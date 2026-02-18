@@ -6,6 +6,7 @@ from .ingest import ingest_document
 from .rag import rag_answer
 from .database import init_db
 from .chat_routes import router as chat_router
+from .embeddings import embedding_store
 
 # Create data directory
 os.makedirs("data", exist_ok=True)
@@ -64,5 +65,63 @@ async def query_documents(query: str):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ---------------- DEBUG/TEST ENDPOINTS ---------------- #
+
+@app.get("/test/search")
+async def test_search(query: str, k: int = 5):
+    """Test what chunks are being retrieved - useful for debugging hallucinations"""
+    try:
+        results = embedding_store.search(query, k=k)
+        
+        return {
+            "query": query,
+            "total_documents_indexed": embedding_store.index.ntotal,
+            "chunks_retrieved": len(results),
+            "results": [
+                {
+                    "chunk_id": r["metadata"].get("chunk_id", "unknown"),
+                    "source": r["metadata"].get("source", "unknown"),
+                    "distance": round(r.get("distance", 0), 3),
+                    "text_preview": r["text"][:500] + "..." if len(r["text"]) > 500 else r["text"],
+                    "full_length": len(r["text"])
+                }
+                for r in results
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/test/stats")
+async def get_stats():
+    """Get statistics about indexed documents"""
+    try:
+        return {
+            "total_chunks_indexed": embedding_store.index.ntotal,
+            "total_metadata_entries": len(embedding_store.metadata),
+            "embedding_dimension": embedding_store.dimension,
+            "model": embedding_store.model.get_sentence_embedding_dimension()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/test/clear")
+async def clear_index():
+    """Clear all indexed documents - useful for testing"""
+    try:
+        # Delete FAISS files
+        if os.path.exists("faiss_index.bin"):
+            os.remove("faiss_index.bin")
+        if os.path.exists("metadata.pkl"):
+            os.remove("metadata.pkl")
+        
+        # Reinitialize
+        from .embeddings import EmbeddingStore
+        global embedding_store
+        embedding_store = EmbeddingStore()
+        
+        return {"message": "Index cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

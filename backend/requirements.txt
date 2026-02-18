@@ -4,3 +4,6 @@ sentence-transformers
 faiss-cpu
 pypdf
 python-multipart
+psycopg2-binary
+sqlalchemy
+requests

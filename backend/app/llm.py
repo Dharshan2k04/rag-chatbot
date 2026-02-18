@@ -13,13 +13,22 @@ def query_ollama(prompt, context="", temperature=0.7, stream=False):
     - 1.0+: Very creative, potentially inconsistent
     """
     
-    # Optimized prompt - shorter and more direct
-    full_prompt = f"""Context:
+    # Enhanced prompt for better accuracy
+    full_prompt = f"""You are a helpful AI assistant analyzing documents. Your task is to answer questions based ONLY on the provided context.
+
+IMPORTANT RULES:
+1. Answer ONLY using information from the context below
+2. If the context contains the answer, provide it clearly and completely
+3. If the information is NOT in the context, say "I cannot find this information in the provided document"
+4. Be specific and cite relevant details from the context
+5. For lists (like projects), include ALL items mentioned in the context
+
+Context:
 {context}
 
 Question: {prompt}
 
-Provide a clear, concise answer based on the context above."""
+Answer (based strictly on the context above):"""
     
     payload = {
         "model": MODEL,
@@ -27,10 +36,11 @@ Provide a clear, concise answer based on the context above."""
         "stream": stream,
         "options": {
             "temperature": temperature,
-            "num_predict": 300,  # Reduced from 512 for faster responses
+            "num_predict": 512,  # Increased for complete answers
             "top_p": 0.9,
             "top_k": 40,
-            "num_ctx": 2048  # Optimized context window
+            "num_ctx": 4096,  # Increased context window
+            "repeat_penalty": 1.1  # Reduce repetition/hallucination
         }
     }
     

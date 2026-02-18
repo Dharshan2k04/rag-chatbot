@@ -10,12 +10,12 @@ def extract_text_from_pdf(file_path):
         text += page.extract_text() + "\n"
     return text
 
-def chunk_text(text, chunk_size=800, overlap=100):
+def chunk_text(text, chunk_size=1200, overlap=200):
     """Split text into chunks
     
-    Optimized settings:
-    - Larger chunks (800 vs 500) = fewer chunks = faster
-    - Maintains quality with good overlap
+    Optimized for accuracy (resumes, documents):
+    - Larger chunks (1200) = better context preservation
+    - More overlap (200) = don't split important info
     """
     chunks = []
     start = 0
@@ -27,7 +27,7 @@ def chunk_text(text, chunk_size=800, overlap=100):
         
         # Only add non-empty chunks
         if chunk.strip():
-            chunks.append(chunk)
+            chunks.append(chunk.strip())
         
         start += chunk_size - overlap
     
