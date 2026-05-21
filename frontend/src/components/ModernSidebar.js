@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import api from "../api";
 
-export default function ModernSidebar({ onNewChat, currentChatId, onSelectChat }) {
+export default function ModernSidebar({ onNewChat, currentChatId, onSelectChat, onRegisterRefresh }) {
   const { user, logout } = useAuth();
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("dark_mode");
@@ -41,6 +41,12 @@ export default function ModernSidebar({ onNewChat, currentChatId, onSelectChat }
 
   useEffect(() => {
     loadChats();
+  }, []);
+
+  useEffect(() => {
+    if (onRegisterRefresh) {
+      onRegisterRefresh(loadChats);
+    }
   }, []);
 
   

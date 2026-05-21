@@ -20,7 +20,7 @@ function ChatApp() {
   const [isIngesting, setIsIngesting] = useState(false);
   const messagesEndRef = useRef(null);
   const initChatCalled = useRef(false);
-
+  const sidebarRefreshRef = useRef(null);
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -33,6 +33,9 @@ function ChatApp() {
   const startNewChat = () => {
     setChatId(null);
     setMessages([]);
+    if (sidebarRefreshRef.current) {
+      sidebarRefreshRef.current();
+    }
   };
 
   const loadChat = async (id) => {
@@ -116,6 +119,10 @@ function ChatApp() {
       const res = await api.post("/chat/new");
       const newChatId = res.data.chat_id;
       setChatId(newChatId);
+      // Refresh sidebar to show new chat
+      if (sidebarRefreshRef.current) {
+        sidebarRefreshRef.current();
+      }
       return newChatId;
     } catch (err) {
       console.error("Failed to create chat:", err);
@@ -268,6 +275,7 @@ function ChatApp() {
         onNewChat={startNewChat}
         currentChatId={chatId}
         onSelectChat={loadChat}
+        onRegisterRefresh={(fn) => { sidebarRefreshRef.current = fn; }}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
