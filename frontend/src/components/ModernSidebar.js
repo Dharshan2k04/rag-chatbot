@@ -43,9 +43,7 @@ export default function ModernSidebar({ onNewChat, currentChatId, onSelectChat }
     loadChats();
   }, []);
 
-  const [hasMore, setHasMore] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const LIMIT = 20;
+  
 
   const loadChats = async () => {
     try {
@@ -58,8 +56,6 @@ export default function ModernSidebar({ onNewChat, currentChatId, onSelectChat }
       setLoading(false);
     }
   };
-
-  const loadMoreChats = () => loadChats(false);
 
   const handleDeleteChat = async (chatId, e) => {
     e.stopPropagation();
