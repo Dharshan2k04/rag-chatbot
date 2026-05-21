@@ -1,132 +1,234 @@
-import sqlite3
-from datetime import datetime
-import json
+"""SQLAlchemy database setup and helper functions"""
 
-DB_PATH = "chats.db"
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+from .models import Base, User, Chat, Message, Document
+
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./chats.db")
+
+# Create engine
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    echo=False  # Set to True for SQL debugging
+)
+
+# Create session factory
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 def init_db():
-    """Initialize SQLite database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,
-            role TEXT,
-            message TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (chat_id) REFERENCES chats (id)
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
+    """Initialize database - create all tables"""
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database initialized successfully")
 
-def create_chat():
-    """Create a new chat session"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chats (title) VALUES (?)", ("New Chat",))
-    chat_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return chat_id
 
-def update_chat_title(chat_id, title):
-    """Update chat title based on first message"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE chats SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (title, chat_id)
-    )
-    conn.commit()
-    conn.close()
+def get_db() -> Session:
+    """Dependency to get database session"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-def save_message(chat_id, role, message):
-    """Save a message to the database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Save message
-    cursor.execute(
-        "INSERT INTO messages (chat_id, role, message) VALUES (?, ?, ?)",
-        (chat_id, role, message)
+
+# ==================== User Functions ====================
+
+def create_user(db: Session, email: str, username: str, password_hash: str) -> User:
+    """Create a new user"""
+    user = User(
+        email=email.lower(),
+        username=username.lower(),
+        password_hash=password_hash
     )
-    
-    # Update chat timestamp
-    cursor.execute(
-        "UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (chat_id,)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    """Get user by email"""
+    return db.query(User).filter(User.email == email.lower()).first()
+
+
+def get_user_by_username(db: Session, username: str) -> User | None:
+    """Get user by username"""
+    return db.query(User).filter(User.username == username.lower()).first()
+
+
+def get_user_by_id(db: Session, user_id: int) -> User | None:
+    """Get user by ID"""
+    return db.query(User).filter(User.id == user_id).first()
+
+
+def update_failed_login_attempts(db: Session, user_id: int, increment: bool = True) -> User:
+    """Update failed login attempts for account lockout"""
+    user = get_user_by_id(db, user_id)
+    if user:
+        if increment:
+            user.failed_login_attempts += 1
+        else:
+            user.failed_login_attempts = 0
+        db.commit()
+        db.refresh(user)
+    return user
+
+
+# ==================== Chat Functions ====================
+
+def create_chat(db: Session, user_id: int, title: str = "New Chat") -> Chat:
+    """Create a new chat session for a user"""
+    chat = Chat(user_id=user_id, title=title)
+    db.add(chat)
+    db.commit()
+    db.refresh(chat)
+    return chat
+
+
+def get_chat_by_id(db: Session, chat_id: int, user_id: int) -> Chat | None:
+    """Get chat by ID with user ownership verification"""
+    return db.query(Chat).filter(
+        Chat.id == chat_id,
+        Chat.user_id == user_id
+    ).first()
+
+
+def get_user_chats(db: Session, user_id: int) -> list[Chat]:
+    """Get all chats for a user, ordered by most recent"""
+    return db.query(Chat).filter(
+        Chat.user_id == user_id
+    ).order_by(Chat.updated_at.desc()).all()
+
+def get_user_chats(db: Session, user_id: int, limit: int = 20, offset: int = 0) -> list[Chat]:
+    """Get chats for a user with pagination, ordered by most recent"""
+    return db.query(Chat).filter(
+        Chat.user_id == user_id
+    ).order_by(Chat.updated_at.desc()).limit(limit).offset(offset).all()
+
+
+def get_user_chat_count(db: Session, user_id: int) -> int:
+    """Get total number of chats for a user"""
+    return db.query(Chat).filter(Chat.user_id == user_id).count()
+
+
+def update_chat_title(db: Session, chat_id: int, user_id: int, title: str) -> Chat | None:
+    """Update chat title with ownership verification"""
+    chat = get_chat_by_id(db, chat_id, user_id)
+    if chat:
+        chat.title = title
+        db.commit()
+        db.refresh(chat)
+    return chat
+
+
+def delete_chat(db: Session, chat_id: int, user_id: int) -> bool:
+    """Delete a chat with ownership verification"""
+    chat = get_chat_by_id(db, chat_id, user_id)
+    if chat:
+        db.delete(chat)
+        db.commit()
+        return True
+    return False
+
+
+# ==================== Message Functions ====================
+
+def save_message(db: Session, chat_id: int, user_id: int, role: str, message: str) -> Message:
+    """Save a message to the database with user verification"""
+    # Verify chat belongs to user
+    chat = get_chat_by_id(db, chat_id, user_id)
+    if not chat:
+        raise ValueError(f"Chat {chat_id} not found or does not belong to user {user_id}")
+
+    msg = Message(
+        chat_id=chat_id,
+        user_id=user_id,
+        role=role,
+        message=message
     )
-    
+    db.add(msg)
+
     # Auto-generate title from first user message
-    cursor.execute(
-        "SELECT COUNT(*) FROM messages WHERE chat_id = ? AND role = 'user'",
-        (chat_id,)
-    )
-    count = cursor.fetchone()[0]
-    
-    if count == 1 and role == "user":
-        # Use first 50 chars of first message as title
-        title = message[:50] + ("..." if len(message) > 50 else "")
-        cursor.execute(
-            "UPDATE chats SET title = ? WHERE id = ?",
-            (title, chat_id)
-        )
-    
-    conn.commit()
-    conn.close()
+    if role == "user":
+        user_message_count = db.query(Message).filter(
+            Message.chat_id == chat_id,
+            Message.role == "user"
+        ).count()
 
-def get_chat_messages(chat_id):
-    """Get all messages for a chat"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT role, message, created_at FROM messages WHERE chat_id = ? ORDER BY created_at",
-        (chat_id,)
-    )
-    messages = [
-        {"role": row[0], "message": row[1], "created_at": row[2]}
-        for row in cursor.fetchall()
-    ]
-    conn.close()
-    return messages
+        if user_message_count == 0:  # This is the first user message
+            title = message[:50] + ("..." if len(message) > 50 else "")
+            chat.title = title
 
-def get_all_chats():
-    """Get all chat sessions ordered by most recent"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, title, created_at, updated_at FROM chats ORDER BY updated_at DESC"
-    )
-    chats = [
-        {
-            "id": row[0], 
-            "title": row[1], 
-            "created_at": row[2],
-            "updated_at": row[3]
-        }
-        for row in cursor.fetchall()
-    ]
-    conn.close()
-    return chats
+    db.commit()
+    db.refresh(msg)
+    return msg
 
-def delete_chat(chat_id):
-    """Delete a chat and all its messages"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
-    cursor.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
-    conn.commit()
-    conn.close()
+
+def get_chat_messages(db: Session, chat_id: int, user_id: int) -> list[Message]:
+    """Get all messages for a chat with user ownership verification"""
+    # Verify chat belongs to user
+    chat = get_chat_by_id(db, chat_id, user_id)
+    if not chat:
+        raise ValueError(f"Chat {chat_id} not found or does not belong to user {user_id}")
+
+    return db.query(Message).filter(
+        Message.chat_id == chat_id
+    ).order_by(Message.created_at).all()
+
+
+# ==================== Document Functions ====================
+
+def record_document(
+    db: Session,
+    user_id: int,
+    filename: str,
+    original_filename: str,
+    file_size: int,
+    chunk_count: int = 0
+) -> Document:
+    """Record a uploaded document in the database"""
+    doc = Document(
+        user_id=user_id,
+        filename=filename,
+        original_filename=original_filename,
+        file_size=file_size,
+        chunk_count=chunk_count
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+def update_document_chunks(db: Session, doc_id: int, user_id: int, chunk_count: int) -> Document | None:
+    """Update document chunk count after ingestion"""
+    doc = db.query(Document).filter(
+        Document.id == doc_id,
+        Document.user_id == user_id
+    ).first()
+    if doc:
+        doc.chunk_count = chunk_count
+        db.commit()
+        db.refresh(doc)
+    return doc
+
+
+def get_user_documents(db: Session, user_id: int) -> list[Document]:
+    """Get all documents for a user"""
+    return db.query(Document).filter(
+        Document.user_id == user_id
+    ).order_by(Document.uploaded_at.desc()).all()
+
+
+# ==================== Cleanup Functions ====================
+
+def delete_all_data(db: Session):
+    """WARNING: Delete all data from database (use only for testing)"""
+    db.query(Message).delete()
+    db.query(Document).delete()
+    db.query(Chat).delete()
+    db.query(User).delete()
+    db.commit()
