@@ -93,7 +93,16 @@ function ChatApp() {
     }, 3000);
   };
 
-  const handleDocumentUploaded = (document) => {
+  const handleDocumentUploaded = async (document) => {
+    // Create a chat if none exists when document is uploaded
+    if (!chatId) {
+      try {
+        const res = await api.post("/chat/new");
+        setChatId(res.data.chat_id);
+      } catch (err) {
+        console.error("Failed to create chat on upload:", err);
+      }
+    }
     setMessages((prev) => [...prev, { role: "document", document }]);
     if (document.id) {
       pollIngestionStatus(document.id);
