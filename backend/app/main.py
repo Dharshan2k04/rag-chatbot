@@ -59,6 +59,37 @@ if settings.sentry_dsn:
 # Create directories
 os.makedirs("data", exist_ok=True)
 
+
+def clear_stale_faiss_on_startup():
+    """
+    Wipe all FAISS indexes if the DB has no users.
+ 
+    HF Spaces use ephemeral SQLite — the DB resets on every restart but the
+    vector_store/ folder persists on disk. This means stale chunks from a
+    previous session survive with doc_ids like 1, 2, 3. When a new user
+    registers and uploads a document, it also gets doc_id=1 — the filter
+    can't distinguish old chunks from new ones, so wrong answers come back.
+ 
+    Clearing vector_store/ when DB is empty guarantees a clean slate.
+    Safe to run on every startup — if DB has users, it does nothing.
+    """
+    import shutil
+    from .database import SessionLocal
+    from .models import User
+ 
+    db = SessionLocal()
+    try:
+        user_count = db.query(User).count()
+        if user_count == 0 and os.path.exists("vector_store"):
+            shutil.rmtree("vector_store")
+            os.makedirs("vector_store", exist_ok=True)
+            logger.info("🧹 Cleared stale FAISS indexes — fresh DB detected")
+        else:
+            logger.info(f"✅ DB has {user_count} user(s) — keeping existing FAISS indexes")
+    finally:
+        db.close()
+ 
+
 # ---------------- FastAPI App ---------------- #
 app = FastAPI(title="RAG Document Intelligence API")
 
@@ -106,6 +137,7 @@ app.add_middleware(
 # ---------------- Initialize Database ---------------- #
 init_db()
 logger.info("Database initialized")
+clear_stale_faiss_on_startup()
 
 from .embeddings import rehydrate_all_stores
 rehydrate_all_stores()
@@ -233,3 +265,27 @@ async def get_stats(current_user: User = Depends(get_current_user)):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "api": "running"}
+
+@app.get("/debug/index")
+async def debug_index(current_user: User = Depends(get_current_user)):
+    """Show all chunks in the user's FAISS index"""
+    store = get_user_store(current_user.id)
+    chunks = []
+    for i, m in enumerate(store.metadata):
+        chunks.append({
+            "chunk_index": i,
+            "doc_id": m.get("doc_id"),
+            "source": m.get("source"),
+            "text_preview": m.get("text", "")[:80]
+        })
+    return {
+        "total_chunks": store.index.ntotal,
+        "chunks": chunks
+    }
+
+@app.delete("/debug/clear-index")
+async def clear_index(current_user: User = Depends(get_current_user)):
+    """Clear the entire FAISS index for the current user"""
+    store = get_user_store(current_user.id)
+    store.clear()
+    return {"message": f"Cleared index for user {current_user.id}"}

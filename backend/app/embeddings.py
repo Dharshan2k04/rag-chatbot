@@ -1,4 +1,4 @@
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 import numpy as np
 import os
@@ -33,7 +33,6 @@ class EmbeddingStore:
             self.index = faiss.IndexFlatIP(self.dimension)
             self.metadata = []
 
-        # Build hash set from existing metadata
         self._chunk_hashes: set[str] = {
             m.get("hash", "") for m in self.metadata if m.get("hash")
         }
@@ -59,7 +58,7 @@ class EmbeddingStore:
 
                 meta = metadatas[i] if metadatas else {"text": text}
                 meta["hash"] = chunk_hash
-                meta["doc_id"] = doc_id  # Track which document this chunk belongs to
+                meta["doc_id"] = doc_id
                 new_metadatas.append(meta)
 
             if not new_texts:
@@ -76,10 +75,21 @@ class EmbeddingStore:
             self.metadata.extend(new_metadatas)
             self.save()
 
-    def search(self, query, k=4, doc_ids: list[int] = None):
+    def search(self, query, k=4, doc_ids: list[int] = None, rerank_pool: int = 15):
         """
         Search for similar texts.
-        If doc_ids is provided, only return results from those documents.
+
+        FIX 1: fetch_k now scans the ENTIRE index when doc_ids filter is active.
+                Previously fetch_k = k*4 = 16, which meant if new document chunks
+                ranked below position 16 in cosine similarity, they were never
+                seen by the doc_id filter at all.
+
+        FIX 2: when doc_ids filter is active and returns no results (stale chunk
+                collision — old chunks from a previous HF Space session have the
+                same doc_id as new chunks because SQLite restarted but FAISS
+                persisted), fall back to source filename matching instead.
+                This catches the case where doc_id=1 exists in both old and new
+                chunks but they belong to completely different documents.
         """
         with self._lock:
             if self.index.ntotal == 0:
@@ -89,8 +99,12 @@ class EmbeddingStore:
             query_embedding = np.array(query_embedding).astype('float32')
             faiss.normalize_L2(query_embedding)
 
-            # Fetch more results than needed so we can filter by doc_id
-            fetch_k = min(self.index.ntotal, k * 4 if doc_ids else k)
+            if doc_ids:
+                # FIX 1: scan ALL chunks so the filter never misses anything
+                fetch_k = self.index.ntotal
+            else:
+                fetch_k = k
+
             distances, indices = self.index.search(query_embedding, fetch_k)
 
             results = []
@@ -99,7 +113,6 @@ class EmbeddingStore:
                     continue
                 meta = self.metadata[idx]
 
-                # Filter by doc_id if specified
                 if doc_ids and meta.get("doc_id") not in doc_ids:
                     continue
 
@@ -109,25 +122,54 @@ class EmbeddingStore:
                     "distance": float(distance)
                 })
 
-                if len(results) >= k:
+                if len(results) >= rerank_pool:
                     break
+
+            # FIX 2: if doc_id filter returned nothing, it means stale chunks from
+            # a previous DB session are colliding — their doc_ids match but they
+            # belong to different physical documents. Fall back to source filename
+            # matching using the most recently added unique source in the index.
+            if doc_ids and not results:
+                print("⚠️  doc_id filter returned no results — falling back to latest source match")
+
+                # Find the source filename of the most recently added chunk
+                # (last entry in metadata = most recently indexed)
+                latest_source = None
+                for meta in reversed(self.metadata):
+                    src = meta.get("source")
+                    if src:
+                        latest_source = src
+                        break
+
+                if latest_source:
+                    print(f"🔁 Fallback: searching chunks from source='{latest_source}'")
+                    distances2, indices2 = self.index.search(query_embedding, self.index.ntotal)
+                    for idx, distance in zip(indices2[0], distances2[0]):
+                        if idx >= len(self.metadata):
+                            continue
+                        meta = self.metadata[idx]
+                        if meta.get("source") != latest_source:
+                            continue
+                        results.append({
+                            "text": meta.get("text", ""),
+                            "metadata": meta,
+                            "distance": float(distance)
+                        })
+                        if len(results) >= k:
+                            break
 
             return results
 
     def delete_document_chunks(self, doc_id: int):
-        """
-        Remove all chunks belonging to a specific document.
-        Rebuilds the FAISS index from scratch excluding that doc's chunks.
-        """
+        """Remove all chunks belonging to a specific document."""
         with self._lock:
             remaining_meta = [m for m in self.metadata if m.get("doc_id") != doc_id]
 
-            if len(remaining_meta) == self.metadata:
-                return  # Nothing to remove
+            if len(remaining_meta) == len(self.metadata):
+                return
 
             print(f"🗑️  Removing chunks for doc_id={doc_id}, rebuilding index...")
 
-            # Rebuild index from remaining chunks
             self.index = faiss.IndexFlatIP(self.dimension)
             self._chunk_hashes = set()
 
@@ -166,10 +208,10 @@ def get_user_store(user_id: int) -> EmbeddingStore:
             _store_cache[user_id] = EmbeddingStore(user_id)
         return _store_cache[user_id]
 
+
 def rehydrate_all_stores():
     """
-    On server startup, reload all existing user FAISS indices from disk
-    so users don't get 'No documents found' after a server restart.
+    On server startup, reload all existing user FAISS indices from disk.
     """
     if not os.path.exists(BASE_INDEX_DIR):
         return
@@ -184,7 +226,6 @@ def rehydrate_all_stores():
             faiss_path = os.path.join(user_dir, "faiss_index.bin")
             metadata_path = os.path.join(user_dir, "metadata.pkl")
 
-            # Only rehydrate if both files exist and index has data
             if not os.path.exists(faiss_path) or not os.path.exists(metadata_path):
                 continue
 
@@ -200,5 +241,20 @@ def rehydrate_all_stores():
             print(f"⚠️  Failed to rehydrate {folder}: {e}")
 
     print(f"🔄 Rehydration complete: {rehydrated} user store(s) loaded from disk")
+
+
+_reranker = None
+_reranker_lock = threading.Lock()
+
+def get_reranker():
+    """Lazy-load the cross-encoder reranker (shared across all users)."""
+    global _reranker
+    if _reranker is None:
+        with _reranker_lock:
+            if _reranker is None:
+                print("🔄 Loading cross-encoder reranker...")
+                _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+                print("✅ Reranker loaded")
+    return _reranker
 
 embedding_store = EmbeddingStore(user_id=0)

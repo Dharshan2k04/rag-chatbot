@@ -1,4 +1,4 @@
-from .embeddings import get_user_store
+from .embeddings import get_user_store, get_reranker
 from .llm_hf import query_huggingface, stream_groq_response
 
 
@@ -45,6 +45,26 @@ def _extract_filename(results: list[dict]) -> str | None:
             return source
     return None
 
+def _rerank_with_cross_encoder(query: str, results: list[dict], top_k: int = 4) -> list[dict]:
+    """
+    Re-score candidates with a cross-encoder for true query-relevance.
+    FAISS cosine similarity is a coarse filter; the cross-encoder reads
+    the query and chunk together and scores actual relevance, which
+    directly raises context precision and lowers hallucination.
+    """
+    if len(results) <= top_k:
+        return results
+
+    reranker = get_reranker()
+    pairs = [[query, r["text"]] for r in results]
+    scores = reranker.predict(pairs)
+
+    for r, s in zip(results, scores):
+        r["rerank_score"] = float(s)
+
+    reranked = sorted(results, key=lambda r: r["rerank_score"], reverse=True)
+    print(f"🎯 Cross-encoder reranked {len(results)} → top {top_k}")
+    return reranked[:top_k]
 
 def rag_answer(
     query: str,
@@ -63,7 +83,7 @@ def rag_answer(
     print(f"🔍 User {user_id} searching: '{query}' | doc_ids={doc_ids}")
 
     store = get_user_store(user_id)
-    results = store.search(query, k=k, doc_ids=doc_ids)
+    results = store.search(query, k=k, doc_ids=doc_ids, rerank_pool=15)
 
     print(f"📚 Found {len(results)} results from FAISS")
 
@@ -72,6 +92,9 @@ def rag_answer(
         raise ValueError("No documents found. Please upload documents first.")
 
     # FIX 2: re-rank so chunks from the most recently uploaded doc come first
+    # Step 1: cross-encoder reranking for true relevance (precision boost)
+    results = _rerank_with_cross_encoder(query, results, top_k=k)
+    # Step 2: recency boost when multiple docs present
     results = _rerank_by_recency(results, doc_ids)
 
     for i, r in enumerate(results, 1):
