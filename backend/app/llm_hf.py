@@ -7,36 +7,70 @@ load_dotenv()
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
+
 def get_client():
     """Lazy Groq client initialization"""
     if not GROQ_API_KEY:
         return None
     return Groq(api_key=GROQ_API_KEY)
 
+
 MODEL = "llama-3.1-8b-instant"
 
-SYSTEM_PROMPT = (
+BASE_SYSTEM_PROMPT = (
     "You are a helpful AI assistant analyzing documents. "
     "Answer questions based ONLY on the provided context. "
-    "If the information is NOT in the context, say 'I cannot find this information in the provided document.' "
+    "If the information is NOT in the context, say "
+    "'I cannot find this information in the provided document.' "
     "Be specific and cite relevant details."
 )
 
-def _build_messages(prompt: str, context: str = "") -> list[dict]:
+
+def _build_system_prompt(filename: str | None = None) -> str:
+    """
+    If a filename is provided, prepend it to the system prompt so the LLM
+    knows exactly which document it is reading from. This prevents it from
+    giving vague cross-document answers when the user asks generic questions
+    like 'what is this document about'.
+    """
+    if filename:
+        return (
+            f"You are analyzing the document: '{filename}'.\n"
+            + BASE_SYSTEM_PROMPT
+        )
+    return BASE_SYSTEM_PROMPT
+
+
+def _build_messages(
+    prompt: str,
+    context: str = "",
+    filename: str | None = None,
+) -> list[dict]:
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": _build_system_prompt(filename)},
         {
             "role": "user",
-            "content": f"Context:\n{context}\n\nQuestion: {prompt}\n\nAnswer (based strictly on the context above):",
+            "content": (
+                f"Context:\n{context}\n\n"
+                f"Question: {prompt}\n\n"
+                f"Answer (based strictly on the context above):"
+            ),
         },
     ]
 
-def query_huggingface(prompt: str, context: str = "", temperature: float = 0.7, stream: bool = False):
+
+def query_huggingface(
+    prompt: str,
+    context: str = "",
+    temperature: float = 0.7,
+    stream: bool = False,
+    filename: str | None = None,      # NEW param
+):
     if not GROQ_API_KEY:
         return "Error: GROQ_API_KEY not configured. Please add it to Space secrets."
 
-    messages = _build_messages(prompt, context)
-    print(f"🚀 Querying Groq with model: {MODEL}")
+    messages = _build_messages(prompt, context, filename=filename)
+    print(f"🚀 Querying Groq | model={MODEL} | doc={filename or 'unknown'}")
 
     try:
         response = get_client().chat.completions.create(
@@ -54,14 +88,20 @@ def query_huggingface(prompt: str, context: str = "", temperature: float = 0.7, 
         print(f"❌ Groq API Error: {str(e)}")
         return f"Error: {str(e)}"
 
-def stream_groq_response(prompt: str, context: str = "", temperature: float = 0.7):
+
+def stream_groq_response(
+    prompt: str,
+    context: str = "",
+    temperature: float = 0.7,
+    filename: str | None = None,      # NEW param
+):
     if not GROQ_API_KEY:
         yield f"data: {json.dumps({'token': 'Error: GROQ_API_KEY not configured.'})}\n\n"
         yield f"data: {json.dumps({'done': True, 'sources': []})}\n\n"
         return
 
-    messages = _build_messages(prompt, context)
-    print(f"🚀 Streaming from Groq with model: {MODEL}")
+    messages = _build_messages(prompt, context, filename=filename)
+    print(f"🚀 Streaming Groq | model={MODEL} | doc={filename or 'unknown'}")
 
     try:
         response = get_client().chat.completions.create(
@@ -79,6 +119,7 @@ def stream_groq_response(prompt: str, context: str = "", temperature: float = 0.
                 yield f"data: {json.dumps({'token': delta})}\n\n"
 
         yield f"data: {json.dumps({'done': True, 'sources': []})}\n\n"
+
     except Exception as e:
         print(f"❌ Groq Streaming Error: {str(e)}")
         yield f"data: {json.dumps({'token': f'Error: {str(e)}'})}\n\n"

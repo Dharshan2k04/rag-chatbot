@@ -16,6 +16,7 @@ from .database import (
     update_chat_title,
     record_document,
     update_document_chunks,
+    get_user_document_ids,
 )
 
 from .rag import rag_answer
@@ -43,26 +44,24 @@ async def chat_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Send a message in a chat (non-streaming)"""
     try:
         if not regenerate:
             save_message(db, chat_id, current_user.id, "user", query)
 
         temperature = 0.9 if regenerate else 0.7
-        answer, sources = rag_answer(query, user_id=current_user.id, temperature=temperature, stream=False)
+        doc_ids = get_user_document_ids(db, current_user.id)
+        answer, sources = rag_answer(
+            query, user_id=current_user.id,
+            temperature=temperature, stream=False,
+            doc_ids=doc_ids if doc_ids else None
+        )
 
         save_message(db, chat_id, current_user.id, "assistant", answer)
-
-        return {
-            "answer": answer,
-            "sources": sources,
-            "regenerated": regenerate,
-        }
+        return {"answer": answer, "sources": sources, "regenerated": regenerate}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
 
 @router.post("/{chat_id}/stream")
 async def chat_message_stream(
@@ -73,12 +72,21 @@ async def chat_message_stream(
     current_user: User = Depends(get_current_user),
 ):
     try:
+        # FIX: save the user message immediately on the request db session,
+        # which is guaranteed to be open at this point.
         if not regenerate:
             save_message(db, chat_id, current_user.id, "user", query)
 
         temperature = 0.9 if regenerate else 0.7
+        doc_ids = get_user_document_ids(db, current_user.id)
+
+        # Capture values we need inside the generator BEFORE db session closes
+        captured_chat_id = chat_id
+        captured_user_id = current_user.id
+
         generator, sources = rag_answer(
-            query, user_id=current_user.id, temperature=temperature, stream=True
+            query, user_id=current_user.id, temperature=temperature, stream=True,
+            doc_ids=doc_ids if doc_ids else None
         )
 
         sources_json = json.dumps({"done": True, "sources": sources})
@@ -104,7 +112,6 @@ async def chat_message_stream(
                     item = await queue.get()
                     if item is None:
                         break
-                    # Extract token text from SSE format and accumulate
                     if item.startswith("data: "):
                         try:
                             data = json.loads(item[6:])
@@ -118,14 +125,15 @@ async def chat_message_stream(
 
             yield f"data: {sources_json}\n\n"
 
-            # Save the full accumulated response to DB
+            # FIX: use captured IDs (not current_user — that object is tied to the
+            # closed request db session and will raise DetachedInstanceError here)
             if accumulated_tokens:
                 full_answer = "".join(accumulated_tokens)
                 try:
                     from .database import SessionLocal
                     save_db = SessionLocal()
                     try:
-                        save_message(save_db, chat_id, current_user.id, "assistant", full_answer)
+                        save_message(save_db, captured_chat_id, captured_user_id, "assistant", full_answer)
                         save_db.commit()
                     finally:
                         save_db.close()
@@ -144,8 +152,7 @@ async def chat_message_stream(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))    
 @router.get("/{chat_id}/messages")
 async def get_messages(
     chat_id: int,

@@ -43,9 +43,15 @@ class Chat(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Tracks which document is active for this chat session.
+    # When a user uploads a document, this gets set to that doc's ID.
+    # RAG queries for this chat will only search chunks from this document.
+    active_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+
     # Relationships
     user = relationship("User", back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
+    active_document = relationship("Document", foreign_keys=[active_doc_id])
 
     # Indexes for fast lookup by user
     __table_args__ = (Index("idx_chat_user_id", "user_id"),)
@@ -85,8 +91,8 @@ class Document(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    filename = Column(String(500), nullable=False)  # Sanitized filename stored
-    original_filename = Column(String(500), nullable=False)  # Original filename for display
+    filename = Column(String(500), nullable=False)
+    original_filename = Column(String(500), nullable=False)
     file_size = Column(Integer, nullable=False)
     chunk_count = Column(Integer, default=0)
     uploaded_at = Column(DateTime, default=datetime.utcnow)

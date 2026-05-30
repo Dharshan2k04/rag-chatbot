@@ -115,19 +115,31 @@ app.include_router(auth_router)
 app.include_router(chat_router)
 
 # ---------------- Background Task ---------------- #
-def _background_ingest(file_path: str, user_id: int, doc_id: int):
+def _background_ingest(file_path: str, user_id: int, doc_id: int, chat_id: int | None = None):
+    """
+    Ingests document chunks into FAISS, updates chunk_count in DB,
+    and — if a chat_id was provided — binds the document to that chat
+    so subsequent queries in that chat only search this document.
+    """
     try:
-        chunks = ingest_document_sync(file_path, user_id, doc_id=doc_id)  # ← add doc_id
-        from .database import SessionLocal
+        chunks = ingest_document_sync(file_path, user_id, doc_id=doc_id)
+        from .database import SessionLocal, set_chat_active_document
         db = SessionLocal()
         try:
             update_document_chunks(db, doc_id, user_id, chunks)
+ 
+            # Bind the document to the chat that triggered the upload
+            if chat_id:
+                set_chat_active_document(db, chat_id, user_id, doc_id)
+                logger.info(f"Chat {chat_id} active document set to doc {doc_id}")
+ 
             db.commit()
-            logger.info(f"Background ingestion complete: user={user_id} doc={doc_id} chunks={chunks}")
+            logger.info(f"Ingestion complete: user={user_id} doc={doc_id} chunks={chunks}")
         finally:
             db.close()
     except Exception as e:
         logger.error(f"Background ingestion failed: {e}")
+
 # ---------------- Routes ---------------- #
 
 @app.get("/")
@@ -139,14 +151,16 @@ async def root():
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    # chat_id is optional — frontend passes it so the upload auto-activates
+    # the document for that specific chat session
+    chat_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Upload and ingest a document (ingestion runs as background task)"""
+    """Upload and ingest a document. Pass chat_id to bind it to a chat session."""
     try:
         file_path, original_filename = await validate_pdf_file(file, current_user.id)
-
-        # Record document in DB
+ 
         file_size = os.path.getsize(file_path)
         doc = record_document(
             db,
@@ -157,12 +171,15 @@ async def upload_document(
             chunk_count=0,
         )
         db.commit()
-
-        # Schedule ingestion in background so upload feels instant
-        background_tasks.add_task(_background_ingest, file_path, current_user.id, doc.id)
-
-        logger.info(f"Upload accepted: user={current_user.id} doc={doc.id} file={original_filename}")
-
+ 
+        # Pass chat_id into background task so it can bind the doc after ingestion
+        background_tasks.add_task(_background_ingest, file_path, current_user.id, doc.id, chat_id)
+ 
+        logger.info(
+            f"Upload accepted: user={current_user.id} doc={doc.id} "
+            f"file={original_filename} chat={chat_id}"
+        )
+ 
         return {
             "message": "Document uploaded. Ingestion in progress...",
             "document_id": doc.id,
