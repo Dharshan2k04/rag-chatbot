@@ -47,7 +47,7 @@ export default function ModernSidebar({ onNewChat, currentChatId, onSelectChat, 
     if (onRegisterRefresh) {
       onRegisterRefresh(loadChats);
     }
-  }, []);
+  }, [onRegisterRefresh]);
 
   
 
