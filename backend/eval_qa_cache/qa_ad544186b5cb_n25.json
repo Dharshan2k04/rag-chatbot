@@ -1,0 +1,127 @@
+[
+  {
+    "question": "What is the name of the degree submitted by Dharshan A?",
+    "ground_truth": "BACHELOR OF ENGINEERING",
+    "source_chunk_id": 0
+  },
+  {
+    "question": "What is the name of the department headed by Dr. R Kumaraswamy?",
+    "ground_truth": "Department of Electronics and Communication Engineering",
+    "source_chunk_id": 2
+  },
+  {
+    "question": "What is the name of the department where the internship was undertaken?",
+    "ground_truth": "Dept.of ECE",
+    "source_chunk_id": 4
+  },
+  {
+    "question": "What library was used for processing PDFs?",
+    "ground_truth": "PyMuPDF",
+    "source_chunk_id": 6
+  },
+  {
+    "question": "What is the page number where the section 'Results' starts?",
+    "ground_truth": "13",
+    "source_chunk_id": 8
+  },
+  {
+    "question": "What is the primary challenge with traditional manual compliance verification?",
+    "ground_truth": "It is inherently time-consuming, labor-intensive, and prone to human error.",
+    "source_chunk_id": 10
+  },
+  {
+    "question": "What were the core objectives of the internship at Accenture BDC14, Bengaluru?",
+    "ground_truth": "To design the Compl-AI platform architecture.",
+    "source_chunk_id": 12
+  },
+  {
+    "question": "Where is Accenture headquartered?",
+    "ground_truth": "Dublin, Ireland",
+    "source_chunk_id": 14
+  },
+  {
+    "question": "What is the name of the AI-powered security compliance platform?",
+    "ground_truth": "l-AI",
+    "source_chunk_id": 16
+  },
+  {
+    "question": "What is the primary backend language for CompliAI?",
+    "ground_truth": "Python",
+    "source_chunk_id": 18
+  },
+  {
+    "question": "What database management system was used to store user account information?",
+    "ground_truth": "MySQL",
+    "source_chunk_id": 20
+  },
+  {
+    "question": "What types of files can be received as evidence attachments by the CompliAI platform?",
+    "ground_truth": "PDF, DOCX, image, or TXT files",
+    "source_chunk_id": 22
+  },
+  {
+    "question": "What API is used for Azure Computer Vision in the text extraction service?",
+    "ground_truth": "Azure Computer Vision",
+    "source_chunk_id": 24
+  },
+  {
+    "question": "What were some of the challenges faced during the internship?",
+    "ground_truth": "integrating multiple technologies and processing different file formats",
+    "source_chunk_id": 26
+  },
+  {
+    "question": "What is the name of the platform developed during the internship?",
+    "ground_truth": "CompliAI",
+    "source_chunk_id": 28
+  },
+  {
+    "question": "What type of storage is used for reliable file storage and retrieval?",
+    "ground_truth": "Azure Blob Storage",
+    "source_chunk_id": 30
+  },
+  {
+    "question": "What is the name of the AI-powered security compliance platform?",
+    "ground_truth": "Compl-AI",
+    "source_chunk_id": 32
+  },
+  {
+    "question": "What regulatory frameworks does the system integrate for compliance verification?",
+    "ground_truth": "HIPAA, NIST CSF, and SOC 2",
+    "source_chunk_id": 34
+  },
+  {
+    "question": "Who is the contributor of Flask-RESTX?",
+    "ground_truth": "Flask-RESTX Contributors",
+    "source_chunk_id": 36
+  },
+  {
+    "question": "What is the 13th goal of the passage?",
+    "ground_truth": "Take urgent action to combat climate change and its impacts",
+    "source_chunk_id": 38
+  },
+  {
+    "question": "What is the primary goal of SDG 16 according to the passage?",
+    "ground_truth": "Peace, Justice and Strong Institutions",
+    "source_chunk_id": 40
+  },
+  {
+    "question": "What formats does the multi-format text extraction pipeline address?",
+    "ground_truth": "PDF, DOCX, image, and TXT formats.",
+    "source_chunk_id": 42
+  },
+  {
+    "question": "What legal frameworks does the passage mention for protecting sensitive data?",
+    "ground_truth": "HIPAA and NIST CSF",
+    "source_chunk_id": 44
+  },
+  {
+    "question": "What technologies did the intern independently learn during the internship?",
+    "ground_truth": "Vue 3 Composition API, Flask-RESTX, Azure Blob Storage SDK, Azure Computer Vision, LangChain, and OpenAI API integration",
+    "source_chunk_id": 46
+  },
+  {
+    "question": "How many items are listed in the WK profile?",
+    "ground_truth": "5",
+    "source_chunk_id": 48
+  }
+]

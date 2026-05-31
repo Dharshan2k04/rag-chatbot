@@ -103,7 +103,7 @@ class EmbeddingStore:
                 # FIX 1: scan ALL chunks so the filter never misses anything
                 fetch_k = self.index.ntotal
             else:
-                fetch_k = k
+                fetch_k = min(self.index.ntotal, max(k, rerank_pool))
 
             distances, indices = self.index.search(query_embedding, fetch_k)
 

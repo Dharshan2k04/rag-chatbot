@@ -1,0 +1,29 @@
+{
+  "timestamp": "20260531_084727",
+  "pipeline": "REAL (cross-encoder rerank)",
+  "retrieval_metrics": {
+    "hit_rate": 0.6666666666666666,
+    "mrr": 0.6666666666666666,
+    "ndcg": 0.6666666666666666,
+    "avg_top_score": 6.300953388214111
+  },
+  "generation_metrics": {
+    "faithfulness": 0.6666666666666666,
+    "answer_relevancy": 0.8472627997398376,
+    "context_precision": 0.8333333333333334,
+    "context_recall": 0.26666666666666666,
+    "answer_correctness": 0.3333333333333333,
+    "hallucination_rate": 0.3333333333333333
+  },
+  "system_metrics": {
+    "avg_retrieval_latency_ms": 1644.1276000017144,
+    "p95_retrieval_latency_ms": 2218.331699999544,
+    "avg_generation_latency_ms": 1948.9527000017308,
+    "p95_generation_latency_ms": 2308.7698399991496,
+    "avg_total_latency_ms": 3593.0803000034452,
+    "p95_total_latency_ms": 4047.1351600041085,
+    "total_chunks_in_index": 50,
+    "k_retrieved": 4,
+    "rerank_pool": 15
+  }
+}

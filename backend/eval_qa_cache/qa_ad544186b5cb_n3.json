@@ -1,0 +1,17 @@
+[
+  {
+    "question": "What is the name of the degree submitted by Dharshan A?",
+    "ground_truth": "BACHELOR OF ENGINEERING",
+    "source_chunk_id": 0
+  },
+  {
+    "question": "What is the name of the AI-powered security compliance platform?",
+    "ground_truth": "l-AI",
+    "source_chunk_id": 16
+  },
+  {
+    "question": "What is the name of the AI-powered security compliance platform?",
+    "ground_truth": "Compl-AI",
+    "source_chunk_id": 32
+  }
+]

@@ -45,14 +45,32 @@ def _extract_filename(results: list[dict]) -> str | None:
             return source
     return None
 
-def _rerank_with_cross_encoder(query: str, results: list[dict], top_k: int = 4) -> list[dict]:
+def _rerank_with_cross_encoder(
+    query: str,
+    results: list[dict],
+    top_k: int = 4,
+    score_threshold: float | None = 0.0,
+    min_keep: int = 1,
+) -> list[dict]:
     """
-    Re-score candidates with a cross-encoder for true query-relevance.
-    FAISS cosine similarity is a coarse filter; the cross-encoder reads
-    the query and chunk together and scores actual relevance, which
-    directly raises context precision and lowers hallucination.
+    Re-score candidates with a cross-encoder for true query-relevance,
+    then optionally DROP chunks scoring below `score_threshold`.
+
+    FAISS cosine similarity is a coarse filter; the cross-encoder reads the
+    query and chunk together and scores actual relevance. We sort by that
+    score, then filter:
+
+      - keep at most `top_k` chunks
+      - drop any chunk scoring below `score_threshold` (cross-encoder logit;
+        ~0.0 separates relevant from irrelevant for ms-marco-MiniLM)
+      - but ALWAYS keep at least `min_keep` chunk so context is never empty,
+        even if every candidate scores below the threshold
+
+    This raises context precision (less noise reaches the LLM) and tends to
+    lower hallucination, at the cost of occasionally dropping a borderline-
+    useful chunk. Set score_threshold=None to disable filtering.
     """
-    if len(results) <= top_k:
+    if not results:
         return results
 
     reranker = get_reranker()
@@ -62,9 +80,24 @@ def _rerank_with_cross_encoder(query: str, results: list[dict], top_k: int = 4) 
     for r, s in zip(results, scores):
         r["rerank_score"] = float(s)
 
-    reranked = sorted(results, key=lambda r: r["rerank_score"], reverse=True)
-    print(f"🎯 Cross-encoder reranked {len(results)} → top {top_k}")
-    return reranked[:top_k]
+    ranked = sorted(results, key=lambda r: r["rerank_score"], reverse=True)
+    top = ranked[:top_k]
+
+    if score_threshold is None:
+        print(f"🎯 Cross-encoder reranked {len(results)} → top {len(top)} (no threshold)")
+        return top
+
+    # Keep chunks above threshold; guarantee at least min_keep
+    kept = [r for r in top if r["rerank_score"] >= score_threshold]
+    if len(kept) < min_keep:
+        kept = top[:min_keep]
+
+    dropped = len(top) - len(kept)
+    print(
+        f"🎯 Cross-encoder reranked {len(results)} → kept {len(kept)} "
+        f"(dropped {dropped} below threshold {score_threshold})"
+    )
+    return kept
 
 def rag_answer(
     query: str,
@@ -73,6 +106,7 @@ def rag_answer(
     temperature: float = 0.7,
     stream: bool = False,
     doc_ids: list[int] = None,
+    rerank_threshold: float | None = 0.0,
 ):
     """
     RAG pipeline: Retrieve → Re-rank → Generate for a specific user.
@@ -91,9 +125,10 @@ def rag_answer(
         print("❌ No documents in index!")
         raise ValueError("No documents found. Please upload documents first.")
 
-    # FIX 2: re-rank so chunks from the most recently uploaded doc come first
     # Step 1: cross-encoder reranking for true relevance (precision boost)
-    results = _rerank_with_cross_encoder(query, results, top_k=k)
+    results = _rerank_with_cross_encoder(
+        query, results, top_k=k, score_threshold=rerank_threshold
+    )
     # Step 2: recency boost when multiple docs present
     results = _rerank_by_recency(results, doc_ids)
 
